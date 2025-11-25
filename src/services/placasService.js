@@ -1,5 +1,5 @@
-const axios = require('axios');
-
+// Usando fetch nativo do Node.js 18+ para evitar problemas com undici/axios
+// Node.js 18+ já tem fetch nativo, não precisa de bibliotecas externas
 class PlacasService {
   constructor() {
     this.baseUrl = 'https://wdapi2.com.br';
@@ -23,38 +23,39 @@ class PlacasService {
 
       const url = `${this.baseUrl}/consulta/${placaFormatada}/${this.token}`;
       
-      const response = await axios.get(url);
+      const response = await fetch(url);
+      const data = await response.json();
       
       // Verifica códigos de status da API
       // A API retorna os dados diretamente quando encontra, ou {success: false} quando não encontra
-      if (response.status === 200 && response.data) {
+      if (response.status === 200 && data) {
         // Se a API retornou success: false, retorna erro
-        if (response.data.success === false) {
+        if (data.success === false) {
           return {
             success: false,
             error: 'Placa não encontrada ou inválida',
-            message: response.data.message || 'A placa informada não existe ou não foi encontrada na base de dados',
+            message: data.message || 'A placa informada não existe ou não foi encontrada na base de dados',
             statusCode: 404
           };
         }
         
         // Verifica se a placa não foi encontrada (status 404 ou message indicando erro)
-        if (response.data.status === 404 || 
-            (response.data.message && response.data.message.includes('Nenhum veículo')) ||
-            (!response.data.marca && !response.data.MARCA && response.data.status)) {
+        if (data.status === 404 || 
+            (data.message && data.message.includes('Nenhum veículo')) ||
+            (!data.marca && !data.MARCA && data.status)) {
           return {
             success: false,
             error: 'Placa não encontrada ou inválida',
-            message: response.data.message || 'A placa informada não existe ou não foi encontrada na base de dados',
+            message: data.message || 'A placa informada não existe ou não foi encontrada na base de dados',
             statusCode: 404
           };
         }
         
         // Se tem dados do veículo (marca ou MARCA), retorna como sucesso
-        if (response.data.marca || response.data.MARCA) {
+        if (data.marca || data.MARCA) {
           return {
             success: true,
-            data: response.data
+            data: data
           };
         }
         
@@ -62,7 +63,7 @@ class PlacasService {
         return {
           success: false,
           error: 'Placa não encontrada ou inválida',
-          message: response.data.message || 'A placa informada não existe ou não foi encontrada na base de dados',
+          message: data.message || 'A placa informada não existe ou não foi encontrada na base de dados',
           statusCode: 404
         };
       }
@@ -74,29 +75,6 @@ class PlacasService {
       };
 
     } catch (error) {
-      if (error.response) {
-        // Erro retornado pela API
-        const statusCode = error.response.status;
-        const responseData = error.response.data;
-        
-        // Verifica se a resposta já tem success: false
-        if (responseData && responseData.success === false) {
-          return {
-            success: false,
-            error: 'Placa não encontrada ou inválida',
-            message: responseData.message || 'A placa informada não existe ou não foi encontrada na base de dados',
-            statusCode: statusCode === 401 ? 404 : statusCode
-          };
-        }
-        
-        return {
-          success: false,
-          error: this.getErrorMessage(statusCode),
-          statusCode: statusCode,
-          message: responseData?.message || error.message
-        };
-      }
-
       // Erro de conexão ou outro erro
       return {
         success: false,
@@ -114,11 +92,12 @@ class PlacasService {
     try {
       const url = `${this.baseUrl}/saldo/${this.token}`;
       
-      const response = await axios.get(url);
+      const response = await fetch(url);
+      const data = await response.json();
       
       // A API já retorna no formato {success: true, data: {...}}
-      if (response.status === 200 && response.data) {
-        return response.data;
+      if (response.status === 200 && data) {
+        return data;
       }
 
       return {
@@ -128,15 +107,6 @@ class PlacasService {
       };
 
     } catch (error) {
-      if (error.response) {
-        return {
-          success: false,
-          error: 'Erro ao consultar saldo',
-          statusCode: error.response.status,
-          message: error.response.data?.message || error.message
-        };
-      }
-
       return {
         success: false,
         error: 'Erro ao consultar saldo',
@@ -178,4 +148,3 @@ class PlacasService {
 }
 
 module.exports = new PlacasService();
-

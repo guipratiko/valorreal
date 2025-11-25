@@ -1,4 +1,4 @@
-const axios = require('axios');
+// Usando fetch nativo do Node.js 18+ para evitar problemas com undici/axios
 const cheerio = require('cheerio');
 
 class PrecoService {
@@ -20,16 +20,22 @@ class PrecoService {
       const modeloFormatado = modelo.toLowerCase().replace(/\s+/g, '-');
       const url = `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${marcaFormatada}/${modeloFormatado}/${ano}`;
 
-      const response = await axios.get(url, {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(url, {
         headers: {
           'User-Agent': this.userAgent,
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'pt-BR,pt;q=0.9',
         },
-        timeout: 10000
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
 
-      const $ = cheerio.load(response.data);
+      const html = await response.text();
+      const $ = cheerio.load(html);
       const precos = [];
       const precosEncontrados = new Set(); // Evita duplicatas
 
@@ -62,9 +68,8 @@ class PrecoService {
 
       // Estratégia 2: Busca por padrões de texto (R$ X.XXX,XX)
       if (precos.length < 5) {
-        const textoCompleto = response.data;
         const regexPreco = /R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)/gi;
-        const matches = textoCompleto.match(regexPreco);
+        const matches = html.match(regexPreco);
         
         if (matches) {
           matches.forEach(match => {
@@ -115,16 +120,22 @@ class PrecoService {
       const modeloFormatado = modelo.toLowerCase().replace(/\s+/g, '-');
       const url = `https://www.webmotors.com.br/carros/${marcaFormatada}/${modeloFormatado}?ano=${ano}`;
 
-      const response = await axios.get(url, {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(url, {
         headers: {
           'User-Agent': this.userAgent,
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'pt-BR,pt;q=0.9',
         },
-        timeout: 10000
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
 
-      const $ = cheerio.load(response.data);
+      const html = await response.text();
+      const $ = cheerio.load(html);
       const precos = [];
       const precosEncontrados = new Set(); // Evita duplicatas
 
@@ -158,9 +169,8 @@ class PrecoService {
 
       // Estratégia 2: Busca por padrões de texto (R$ X.XXX,XX)
       if (precos.length < 5) {
-        const textoCompleto = response.data;
         const regexPreco = /R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)/gi;
-        const matches = textoCompleto.match(regexPreco);
+        const matches = html.match(regexPreco);
         
         if (matches) {
           matches.forEach(match => {
