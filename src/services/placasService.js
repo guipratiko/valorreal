@@ -1,5 +1,6 @@
-// Usando fetch nativo do Node.js 18+ para evitar problemas com undici/axios
-// Node.js 18+ já tem fetch nativo, não precisa de bibliotecas externas
+// Usando node-fetch@2 para evitar problemas com undici do Node.js 18
+const fetch = require('node-fetch');
+
 class PlacasService {
   constructor() {
     this.baseUrl = 'https://wdapi2.com.br';

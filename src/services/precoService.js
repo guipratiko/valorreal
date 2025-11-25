@@ -1,4 +1,5 @@
-// Usando fetch nativo do Node.js 18+ para evitar problemas com undici/axios
+// Usando node-fetch@2 para evitar problemas com undici do Node.js 18
+const fetch = require('node-fetch');
 const cheerio = require('cheerio');
 
 class PrecoService {
