@@ -1,5 +1,6 @@
 // Usando node-fetch@2 para evitar problemas com undici do Node.js 18
 const fetch = require('node-fetch');
+const PlacaCache = require('../models/PlacaCache');
 
 class PlacasService {
   constructor() {
@@ -22,6 +23,23 @@ class PlacasService {
         throw new Error('Formato de placa inválido. Use o formato AAA0X00 ou AAA9999');
       }
 
+      // Verifica se existe no cache
+      try {
+        const cache = await PlacaCache.findOne({ placa: placaFormatada });
+        if (cache && cache.dados) {
+          console.log(`✅ Placa ${placaFormatada} encontrada no cache`);
+          return {
+            success: true,
+            data: cache.dados,
+            cached: true
+          };
+        }
+      } catch (cacheError) {
+        // Se MongoDB não estiver disponível, continua normalmente
+        console.log('Cache não disponível, consultando API...');
+      }
+
+      // Se não encontrou no cache, consulta a API
       const url = `${this.baseUrl}/consulta/${placaFormatada}/${this.token}`;
       
       const response = await fetch(url);
@@ -54,9 +72,30 @@ class PlacasService {
         
         // Se tem dados do veículo (marca ou MARCA), retorna como sucesso
         if (data.marca || data.MARCA) {
+          // Salva no cache para próximas consultas (válido por 30 dias)
+          try {
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + 30); // Adiciona 30 dias
+            
+            await PlacaCache.findOneAndUpdate(
+              { placa: placaFormatada },
+              { 
+                placa: placaFormatada,
+                dados: data,
+                expiresAt: expiresAt
+              },
+              { upsert: true, new: true }
+            );
+            console.log(`💾 Placa ${placaFormatada} salva no cache (expira em 30 dias)`);
+          } catch (cacheError) {
+            // Se falhar ao salvar no cache, continua normalmente
+            console.log('Erro ao salvar no cache:', cacheError.message);
+          }
+
           return {
             success: true,
-            data: data
+            data: data,
+            cached: false
           };
         }
         

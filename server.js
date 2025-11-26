@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { connectDB } = require('./src/config/database');
 const placasRoutes = require('./src/routes/placasRoutes');
 
 const app = express();
@@ -55,8 +56,11 @@ app.use((req, res) => {
   });
 });
 
+// Conecta ao MongoDB
+connectDB().catch(console.error);
+
 // Inicia o servidor
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`📡 API disponível em http://localhost:${PORT}`);
   console.log(`🔍 Exemplo: http://localhost:${PORT}/api/placas/ABC1234`);
