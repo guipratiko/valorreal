@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { connectDB } = require('./src/config/database');
+const { connectDB, disconnectDB } = require('./src/config/database');
 const placasRoutes = require('./src/routes/placasRoutes');
 
 const app = express();
@@ -56,6 +56,39 @@ app.use((req, res) => {
   });
 });
 
+// Variável para armazenar a instância do servidor
+let server;
+
+// Tratamento de sinais para encerramento gracioso
+const gracefulShutdown = async (signal) => {
+  console.log(`\n${signal} recebido. Encerrando servidor graciosamente...`);
+  
+  if (server) {
+    await new Promise((resolve) => {
+      server.close(() => {
+        console.log('Servidor HTTP encerrado');
+        resolve();
+      });
+    });
+  }
+  
+  await disconnectDB();
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Tratamento de erros não capturados
+process.on('uncaughtException', (error) => {
+  console.error('❌ Erro não capturado:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Promise rejeitada não tratada:', reason);
+});
+
 // Conecta ao MongoDB antes de iniciar o servidor
 connectDB().then((connected) => {
   if (!connected) {
@@ -64,7 +97,7 @@ connectDB().then((connected) => {
 }).catch(console.error);
 
 // Inicia o servidor
-app.listen(PORT, async () => {
+server = app.listen(PORT, async () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`📡 API disponível em http://localhost:${PORT}`);
   console.log(`🔍 Exemplo: http://localhost:${PORT}/api/placas/ABC1234`);
@@ -81,4 +114,3 @@ app.listen(PORT, async () => {
 });
 
 module.exports = app;
-
