@@ -17,7 +17,11 @@ class PrecoService {
       const { marca, modelo, ano } = this.prepararDadosBusca(dadosVeiculo);
       
       // Monta URL de busca no OLX (marca e modelo já vêm normalizados)
-      const url = `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${marca}/${modelo}/${ano}`;
+      // Adiciona parâmetros de query para melhorar a busca
+      const modeloQuery = modelo.replace(/-/g, ' '); // Remove hífens para query
+      const url = `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${marca}/${modelo}?q=${encodeURIComponent(marca + ' ' + modeloQuery)}&rs=${ano}`;
+      
+      console.log(`🔗 URL OLX: ${url}`);
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
@@ -303,18 +307,25 @@ class PrecoService {
     
     try {
       if (dadosVeiculo.fipe && dadosVeiculo.fipe.dados && Array.isArray(dadosVeiculo.fipe.dados)) {
-        dadosVeiculo.fipe.dados.forEach(item => {
+        console.log(`📋 Extraindo preços FIPE de ${dadosVeiculo.fipe.dados.length} itens`);
+        dadosVeiculo.fipe.dados.forEach((item, index) => {
           if (item.texto_valor) {
             // Extrai o preço do formato "R$ 159.713,00"
             const preco = this.extrairPreco(item.texto_valor);
             if (preco > 0) {
+              console.log(`  - Item ${index + 1}: ${item.texto_valor} -> R$ ${preco.toFixed(2)}`);
               precos.push(preco);
+            } else {
+              console.log(`  - Item ${index + 1}: ${item.texto_valor} -> preço inválido`);
             }
           }
         });
+        console.log(`✅ Total de preços FIPE extraídos: ${precos.length}`);
+      } else {
+        console.log('⚠️  Dados FIPE não disponíveis ou formato inválido');
       }
     } catch (error) {
-      console.error('Erro ao extrair preços FIPE:', error);
+      console.error('❌ Erro ao extrair preços FIPE:', error);
     }
     
     return precos;
@@ -375,6 +386,29 @@ class PrecoService {
   }
 
   /**
+   * Normaliza o nome do modelo para busca nos sites
+   * @param {string} modelo - Nome do modelo
+   * @returns {string} Modelo normalizado
+   */
+  normalizarModelo(modelo) {
+    if (!modelo) return '';
+    
+    // Remove espaços extras e converte para minúsculo
+    let modeloNormalizado = modelo.trim().toLowerCase().replace(/\s+/g, '-');
+    
+    // Padrões comuns: c200 -> c-200, a3 -> a-3, etc (letra seguida de número)
+    modeloNormalizado = modeloNormalizado.replace(/([a-z])(\d)/g, '$1-$2');
+    
+    // Remove hífens duplicados
+    modeloNormalizado = modeloNormalizado.replace(/-+/g, '-');
+    
+    // Remove hífen no início/fim
+    modeloNormalizado = modeloNormalizado.replace(/^-+|-+$/g, '');
+    
+    return modeloNormalizado;
+  }
+
+  /**
    * Prepara dados para busca
    * @param {Object} dadosVeiculo - Dados do veículo
    * @returns {Object} Dados formatados
@@ -387,8 +421,8 @@ class PrecoService {
     // Normaliza a marca
     const marcaNormalizada = this.normalizarMarca(marca);
     
-    // Normaliza o modelo (remove espaços extras e converte para minúsculo)
-    const modeloNormalizado = modelo.trim().toLowerCase().replace(/\s+/g, '-');
+    // Normaliza o modelo
+    const modeloNormalizado = this.normalizarModelo(modelo);
 
     return {
       marca: marcaNormalizada,
