@@ -16,10 +16,8 @@ class PrecoService {
     try {
       const { marca, modelo, ano } = this.prepararDadosBusca(dadosVeiculo);
       
-      // Monta URL de busca no OLX
-      const marcaFormatada = marca.toLowerCase().replace(/\s+/g, '-');
-      const modeloFormatado = modelo.toLowerCase().replace(/\s+/g, '-');
-      const url = `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${marcaFormatada}/${modeloFormatado}/${ano}`;
+      // Monta URL de busca no OLX (marca e modelo já vêm normalizados)
+      const url = `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${marca}/${modelo}/${ano}`;
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
@@ -116,10 +114,8 @@ class PrecoService {
     try {
       const { marca, modelo, ano } = this.prepararDadosBusca(dadosVeiculo);
       
-      // Monta URL de busca no Webmotors
-      const marcaFormatada = marca.toLowerCase().replace(/\s+/g, '-');
-      const modeloFormatado = modelo.toLowerCase().replace(/\s+/g, '-');
-      const url = `https://www.webmotors.com.br/carros/${marcaFormatada}/${modeloFormatado}?ano=${ano}`;
+      // Monta URL de busca no Webmotors (marca e modelo já vêm normalizados)
+      const url = `https://www.webmotors.com.br/carros/${marca}/${modelo}?ano=${ano}`;
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
@@ -215,8 +211,9 @@ class PrecoService {
    */
   async buscarPrecosMedio(dadosVeiculo) {
     try {
+      const marcaOriginal = dadosVeiculo.MARCA || dadosVeiculo.marca || '';
       const { marca, modelo, ano } = this.prepararDadosBusca(dadosVeiculo);
-      console.log(`🔍 Buscando preços para: ${marca} ${modelo} ${ano}`);
+      console.log(`🔍 Buscando preços para: ${marcaOriginal} → ${marca} | ${modelo} | ${ano}`);
       
       // Busca em paralelo nos dois sites
       const [precosOLX, precosWebmotors] = await Promise.all([
@@ -324,6 +321,60 @@ class PrecoService {
   }
 
   /**
+   * Normaliza o nome da marca para busca nos sites
+   * @param {string} marca - Nome da marca
+   * @returns {string} Marca normalizada
+   */
+  normalizarMarca(marca) {
+    if (!marca) return '';
+    
+    const marcaUpper = marca.toUpperCase().trim();
+    
+    // Mapeamento de marcas e suas variações
+    const mapeamentoMarcas = {
+      'M.BENZ': 'mercedes-benz',
+      'MERCEDES': 'mercedes-benz',
+      'MERCEDES BENZ': 'mercedes-benz',
+      'MERCEDES-BENZ': 'mercedes-benz',
+      'MB': 'mercedes-benz',
+      'VW': 'volkswagen',
+      'VOLKSWAGEN': 'volkswagen',
+      'GM': 'chevrolet',
+      'CHEVROLET': 'chevrolet',
+      'FORD': 'ford',
+      'FIAT': 'fiat',
+      'TOYOTA': 'toyota',
+      'HONDA': 'honda',
+      'NISSAN': 'nissan',
+      'HYUNDAI': 'hyundai',
+      'PEUGEOT': 'peugeot',
+      'CITROEN': 'citroen',
+      'CITROËN': 'citroen',
+      'RENAULT': 'renault',
+      'BMW': 'bmw',
+      'AUDI': 'audi',
+      'JEEP': 'jeep',
+      'MITSUBISHI': 'mitsubishi',
+      'SUZUKI': 'suzuki',
+      'KIA': 'kia',
+      'CHERY': 'chery',
+      'CAOA CHERY': 'chery',
+      'TAC': 'tac',
+      'RAM': 'ram',
+      'DODGE': 'dodge',
+      'CHRYSLER': 'chrysler'
+    };
+    
+    // Verifica se há mapeamento direto
+    if (mapeamentoMarcas[marcaUpper]) {
+      return mapeamentoMarcas[marcaUpper];
+    }
+    
+    // Se não encontrou, retorna em minúsculo e sem espaços extras
+    return marca.toLowerCase().trim().replace(/\s+/g, '-');
+  }
+
+  /**
    * Prepara dados para busca
    * @param {Object} dadosVeiculo - Dados do veículo
    * @returns {Object} Dados formatados
@@ -333,9 +384,15 @@ class PrecoService {
     const modelo = dadosVeiculo.MODELO || dadosVeiculo.modelo || '';
     const ano = dadosVeiculo.ano || dadosVeiculo.anoModelo || '';
 
+    // Normaliza a marca
+    const marcaNormalizada = this.normalizarMarca(marca);
+    
+    // Normaliza o modelo (remove espaços extras e converte para minúsculo)
+    const modeloNormalizado = modelo.trim().toLowerCase().replace(/\s+/g, '-');
+
     return {
-      marca: marca.trim(),
-      modelo: modelo.trim(),
+      marca: marcaNormalizada,
+      modelo: modeloNormalizado,
       ano: ano.toString().trim()
     };
   }
