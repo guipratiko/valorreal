@@ -5,6 +5,27 @@ const cheerio = require('cheerio');
 class PrecoService {
   constructor() {
     this.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+    this.seletoresOLX = [
+      '[data-ds-component="DS-AdCard-Text"]',
+      '[class*="price"]',
+      '[class*="preco"]',
+      '[class*="Price"]',
+      '[class*="Preco"]',
+      '.olx-text',
+      '[data-testid*="price"]',
+      '[data-testid*="preco"]'
+    ];
+    this.seletoresWebmotors = [
+      '[class*="Price"]',
+      '[class*="price"]',
+      '[class*="Preco"]',
+      '[class*="preco"]',
+      '[data-testid*="price"]',
+      '[data-testid*="preco"]',
+      '.price',
+      '.preco',
+      '[itemprop="price"]'
+    ];
   }
 
   /**
@@ -14,91 +35,42 @@ class PrecoService {
    */
   async buscarPrecosOLX(dadosVeiculo) {
     try {
-      const { marca, modelo, ano } = this.prepararDadosBusca(dadosVeiculo);
-      
-      // Monta URL de busca no OLX (marca e modelo já vêm normalizados)
-      // Adiciona parâmetros de query para melhorar a busca
-      const modeloQuery = modelo.replace(/-/g, ' '); // Remove hífens para query
-      const url = `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${marca}/${modelo}?q=${encodeURIComponent(marca + ' ' + modeloQuery)}&rs=${ano}`;
-      
-      console.log(`🔗 URL OLX: ${url}`);
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': this.userAgent,
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'pt-BR,pt;q=0.9',
-        },
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-
-      const html = await response.text();
-      const $ = cheerio.load(html);
       const precos = [];
       const precosEncontrados = new Set(); // Evita duplicatas
+      const { marca, modelo, ano, termosBusca } = this.prepararDadosBusca(dadosVeiculo);
+      const urlsPrioritarias = this.gerarURLsOLX(marca, modelo, ano);
 
-      // Estratégia 1: Busca por seletores específicos do OLX
-      const seletoresPreco = [
-        '[data-ds-component="DS-AdCard-Text"]',
-        '[class*="price"]',
-        '[class*="preco"]',
-        '[class*="Price"]',
-        '[class*="Preco"]',
-        '.olx-text',
-        '[data-testid*="price"]',
-        '[data-testid*="preco"]'
-      ];
+      for (const url of urlsPrioritarias) {
+        if (!url || precos.length >= 20) break;
+        await this.coletarPrecosDeURL({
+          url,
+          site: 'OLX',
+          seletores: this.seletoresOLX,
+          seletorLinks: 'a[href*="/autos-e-pecas/carros-vans-e-utilitarios"]'
+        }, precos, precosEncontrados);
 
-      seletoresPreco.forEach(seletor => {
-        $(seletor).each((i, element) => {
-          try {
-            const precoTexto = $(element).text().trim();
-            const preco = this.extrairPreco(precoTexto);
-            if (preco > 0 && !precosEncontrados.has(preco)) {
-              precos.push(preco);
-              precosEncontrados.add(preco);
-            }
-          } catch (err) {
-            // Ignora erros individuais
-          }
-        });
-      });
-
-      // Estratégia 2: Busca por padrões de texto (R$ X.XXX,XX)
-      if (precos.length < 5) {
-        const regexPreco = /R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)/gi;
-        const matches = html.match(regexPreco);
-        
-        if (matches) {
-          matches.forEach(match => {
-            const preco = this.extrairPreco(match);
-            if (preco > 0 && preco < 1000000 && !precosEncontrados.has(preco)) {
-              precos.push(preco);
-              precosEncontrados.add(preco);
-            }
-          });
+        if (precos.length >= 5) {
+          break;
         }
       }
 
-      // Estratégia 3: Busca em links de anúncios
-      if (precos.length < 5) {
-        $('a[href*="/autos-e-pecas/carros-vans-e-utilitarios"]').each((i, element) => {
-          try {
-            const precoTexto = $(element).text();
-            const preco = this.extrairPreco(precoTexto);
-            if (preco > 0 && preco < 1000000 && !precosEncontrados.has(preco)) {
-              precos.push(preco);
-              precosEncontrados.add(preco);
-            }
-          } catch (err) {
-            // Ignora erros individuais
+      // Fallback para busca textual se o slug não encontrou resultados
+      if (precos.length < 5 && termosBusca.length > 0) {
+        const consultas = this.gerarConsultasTexto(termosBusca, ano);
+        for (const consulta of consultas) {
+          if (precos.length >= 15) break; // evita muitas requisições
+          const urlBusca = `https://www.olx.com.br/brasil?q=${encodeURIComponent(consulta)}`;
+          await this.coletarPrecosDeURL({
+            url: urlBusca,
+            site: 'OLX/busca',
+            seletores: this.seletoresOLX,
+            seletorLinks: 'a[href*="/autos-e-pecas/carros-vans-e-utilitarios"]'
+          }, precos, precosEncontrados);
+
+          if (precos.length >= 5) {
+            break;
           }
-        });
+        }
       }
 
       return precos.slice(0, 20); // Limita a 20 resultados
@@ -116,88 +88,42 @@ class PrecoService {
    */
   async buscarPrecosWebmotors(dadosVeiculo) {
     try {
-      const { marca, modelo, ano } = this.prepararDadosBusca(dadosVeiculo);
-      
-      // Monta URL de busca no Webmotors (marca e modelo já vêm normalizados)
-      const url = `https://www.webmotors.com.br/carros/${marca}/${modelo}?ano=${ano}`;
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': this.userAgent,
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'pt-BR,pt;q=0.9',
-        },
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-
-      const html = await response.text();
-      const $ = cheerio.load(html);
       const precos = [];
       const precosEncontrados = new Set(); // Evita duplicatas
+      const { marca, modelo, ano, termosBusca } = this.prepararDadosBusca(dadosVeiculo);
+      const urlsPrioritarias = this.gerarURLsWebmotors(marca, modelo, ano);
 
-      // Estratégia 1: Busca por seletores específicos do Webmotors
-      const seletoresPreco = [
-        '[class*="Price"]',
-        '[class*="price"]',
-        '[class*="Preco"]',
-        '[class*="preco"]',
-        '[data-testid*="price"]',
-        '[data-testid*="preco"]',
-        '.price',
-        '.preco',
-        '[itemprop="price"]'
-      ];
+      for (const url of urlsPrioritarias) {
+        if (!url || precos.length >= 20) break;
+        await this.coletarPrecosDeURL({
+          url,
+          site: 'Webmotors',
+          seletores: this.seletoresWebmotors,
+          seletorLinks: '[class*="card"]'
+        }, precos, precosEncontrados);
 
-      seletoresPreco.forEach(seletor => {
-        $(seletor).each((i, element) => {
-          try {
-            const precoTexto = $(element).text().trim();
-            const preco = this.extrairPreco(precoTexto);
-            if (preco > 0 && !precosEncontrados.has(preco)) {
-              precos.push(preco);
-              precosEncontrados.add(preco);
-            }
-          } catch (err) {
-            // Ignora erros individuais
-          }
-        });
-      });
-
-      // Estratégia 2: Busca por padrões de texto (R$ X.XXX,XX)
-      if (precos.length < 5) {
-        const regexPreco = /R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)/gi;
-        const matches = html.match(regexPreco);
-        
-        if (matches) {
-          matches.forEach(match => {
-            const preco = this.extrairPreco(match);
-            if (preco > 0 && preco < 1000000 && !precosEncontrados.has(preco)) {
-              precos.push(preco);
-              precosEncontrados.add(preco);
-            }
-          });
+        if (precos.length >= 5) {
+          break;
         }
       }
 
-      // Estratégia 3: Busca em cards de veículos
-      if (precos.length < 5) {
-        $('[class*="card"]').each((i, element) => {
-          try {
-            const precoTexto = $(element).text();
-            const preco = this.extrairPreco(precoTexto);
-            if (preco > 0 && preco < 1000000 && !precosEncontrados.has(preco)) {
-              precos.push(preco);
-              precosEncontrados.add(preco);
-            }
-          } catch (err) {
-            // Ignora erros individuais
+      // Fallback para busca textual no Webmotors (oq = query)
+      if (precos.length < 5 && termosBusca.length > 0) {
+        const consultas = this.gerarConsultasTexto(termosBusca, ano);
+        for (const consulta of consultas) {
+          if (precos.length >= 15) break;
+          const urlBusca = `https://www.webmotors.com.br/carros?oq=${encodeURIComponent(consulta)}`;
+          await this.coletarPrecosDeURL({
+            url: urlBusca,
+            site: 'Webmotors/busca',
+            seletores: this.seletoresWebmotors,
+            seletorLinks: '[class*="card"]'
+          }, precos, precosEncontrados);
+
+          if (precos.length >= 5) {
+            break;
           }
-        });
+        }
       }
 
       return precos.slice(0, 20); // Limita a 20 resultados
@@ -215,27 +141,19 @@ class PrecoService {
    */
   async buscarPrecosMedio(dadosVeiculo) {
     try {
-      const marcaOriginal = dadosVeiculo.MARCA || dadosVeiculo.marca || '';
-      const { marca, modelo, ano } = this.prepararDadosBusca(dadosVeiculo);
-      console.log(`🔍 Buscando preços para: ${marcaOriginal} → ${marca} | ${modelo} | ${ano}`);
-      
       // Busca em paralelo nos dois sites
       const [precosOLX, precosWebmotors] = await Promise.all([
         this.buscarPrecosOLX(dadosVeiculo),
         this.buscarPrecosWebmotors(dadosVeiculo)
       ]);
 
-      console.log(`📊 Preços encontrados - OLX: ${precosOLX.length}, Webmotors: ${precosWebmotors.length}`);
-
       const todosPrecos = [...precosOLX, ...precosWebmotors];
 
       // Se não encontrou preços, tenta usar dados da FIPE
       if (todosPrecos.length === 0) {
-        console.log('⚠️  Nenhum preço encontrado nos sites, tentando FIPE...');
         const precosFIPE = this.extrairPrecosFIPE(dadosVeiculo);
         
         if (precosFIPE.length > 0) {
-          console.log(`✅ Encontrados ${precosFIPE.length} preços na FIPE`);
           const estatisticas = this.calcularEstatisticas(precosFIPE);
           return {
             success: true,
@@ -250,14 +168,12 @@ class PrecoService {
           };
         }
         
-        console.log('❌ Nenhum preço encontrado (nem nos sites nem na FIPE)');
         return {
           success: false,
           message: 'Nenhum preço encontrado',
           precos: {
             olx: [],
             webmotors: [],
-            fipe: [],
             todos: []
           },
           estatisticas: null
@@ -307,128 +223,215 @@ class PrecoService {
     
     try {
       if (dadosVeiculo.fipe && dadosVeiculo.fipe.dados && Array.isArray(dadosVeiculo.fipe.dados)) {
-        console.log(`📋 Extraindo preços FIPE de ${dadosVeiculo.fipe.dados.length} itens`);
-        dadosVeiculo.fipe.dados.forEach((item, index) => {
+        dadosVeiculo.fipe.dados.forEach(item => {
           if (item.texto_valor) {
             // Extrai o preço do formato "R$ 159.713,00"
             const preco = this.extrairPreco(item.texto_valor);
             if (preco > 0) {
-              console.log(`  - Item ${index + 1}: ${item.texto_valor} -> R$ ${preco.toFixed(2)}`);
               precos.push(preco);
-            } else {
-              console.log(`  - Item ${index + 1}: ${item.texto_valor} -> preço inválido`);
             }
           }
         });
-        console.log(`✅ Total de preços FIPE extraídos: ${precos.length}`);
-      } else {
-        console.log('⚠️  Dados FIPE não disponíveis ou formato inválido');
       }
     } catch (error) {
-      console.error('❌ Erro ao extrair preços FIPE:', error);
+      console.error('Erro ao extrair preços FIPE:', error);
     }
     
     return precos;
   }
 
   /**
-   * Normaliza o nome da marca para busca nos sites
-   * @param {string} marca - Nome da marca
-   * @returns {string} Marca normalizada
-   */
-  normalizarMarca(marca) {
-    if (!marca) return '';
-    
-    const marcaUpper = marca.toUpperCase().trim();
-    
-    // Mapeamento de marcas e suas variações
-    const mapeamentoMarcas = {
-      'M.BENZ': 'mercedes-benz',
-      'MERCEDES': 'mercedes-benz',
-      'MERCEDES BENZ': 'mercedes-benz',
-      'MERCEDES-BENZ': 'mercedes-benz',
-      'MB': 'mercedes-benz',
-      'VW': 'volkswagen',
-      'VOLKSWAGEN': 'volkswagen',
-      'GM': 'chevrolet',
-      'CHEVROLET': 'chevrolet',
-      'FORD': 'ford',
-      'FIAT': 'fiat',
-      'TOYOTA': 'toyota',
-      'HONDA': 'honda',
-      'NISSAN': 'nissan',
-      'HYUNDAI': 'hyundai',
-      'PEUGEOT': 'peugeot',
-      'CITROEN': 'citroen',
-      'CITROËN': 'citroen',
-      'RENAULT': 'renault',
-      'BMW': 'bmw',
-      'AUDI': 'audi',
-      'JEEP': 'jeep',
-      'MITSUBISHI': 'mitsubishi',
-      'SUZUKI': 'suzuki',
-      'KIA': 'kia',
-      'CHERY': 'chery',
-      'CAOA CHERY': 'chery',
-      'TAC': 'tac',
-      'RAM': 'ram',
-      'DODGE': 'dodge',
-      'CHRYSLER': 'chrysler'
-    };
-    
-    // Verifica se há mapeamento direto
-    if (mapeamentoMarcas[marcaUpper]) {
-      return mapeamentoMarcas[marcaUpper];
-    }
-    
-    // Se não encontrou, retorna em minúsculo e sem espaços extras
-    return marca.toLowerCase().trim().replace(/\s+/g, '-');
-  }
-
-  /**
-   * Normaliza o nome do modelo para busca nos sites
-   * @param {string} modelo - Nome do modelo
-   * @returns {string} Modelo normalizado
-   */
-  normalizarModelo(modelo) {
-    if (!modelo) return '';
-    
-    // Remove espaços extras e converte para minúsculo
-    let modeloNormalizado = modelo.trim().toLowerCase().replace(/\s+/g, '-');
-    
-    // Padrões comuns: c200 -> c-200, a3 -> a-3, etc (letra seguida de número)
-    modeloNormalizado = modeloNormalizado.replace(/([a-z])(\d)/g, '$1-$2');
-    
-    // Remove hífens duplicados
-    modeloNormalizado = modeloNormalizado.replace(/-+/g, '-');
-    
-    // Remove hífen no início/fim
-    modeloNormalizado = modeloNormalizado.replace(/^-+|-+$/g, '');
-    
-    return modeloNormalizado;
-  }
-
-  /**
-   * Prepara dados para busca
-   * @param {Object} dadosVeiculo - Dados do veículo
-   * @returns {Object} Dados formatados
+   * Prepara e normaliza dados para as consultas
    */
   prepararDadosBusca(dadosVeiculo) {
-    const marca = dadosVeiculo.MARCA || dadosVeiculo.marca || '';
-    const modelo = dadosVeiculo.MODELO || dadosVeiculo.modelo || '';
-    const ano = dadosVeiculo.ano || dadosVeiculo.anoModelo || '';
+    const marca = (dadosVeiculo.MARCA || dadosVeiculo.marca || '').trim();
+    const modeloPrincipal = (dadosVeiculo.MODELO || dadosVeiculo.modelo || '').trim();
+    const ano = (dadosVeiculo.ano || dadosVeiculo.anoModelo || dadosVeiculo.extra?.ano_modelo || '')
+      .toString()
+      .trim();
 
-    // Normaliza a marca
-    const marcaNormalizada = this.normalizarMarca(marca);
-    
-    // Normaliza o modelo
-    const modeloNormalizado = this.normalizarModelo(modelo);
+    const termosExtras = [
+      `${marca} ${modeloPrincipal}`.trim(),
+      dadosVeiculo.SUBMODELO,
+      dadosVeiculo.submodelo,
+      dadosVeiculo.versao,
+      dadosVeiculo.VERSAO,
+      dadosVeiculo.extra?.modelo,
+      dadosVeiculo.extra?.grupo,
+      dadosVeiculo.extra?.linha
+    ];
+
+    const termosBusca = Array.from(new Set(
+      termosExtras
+        .map((termo) => this.normalizarTermo(termo))
+        .filter(Boolean)
+    ));
 
     return {
-      marca: marcaNormalizada,
-      modelo: modeloNormalizado,
-      ano: ano.toString().trim()
+      marca,
+      modelo: modeloPrincipal || termosExtras.find(Boolean) || '',
+      ano,
+      termosBusca
     };
+  }
+
+  normalizarTermo(termo = '') {
+    if (!termo) return '';
+    return termo
+      .toString()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  slugify(texto = '') {
+    const normalizado = this.normalizarTermo(texto);
+    return normalizado ? normalizado.toLowerCase().replace(/\s+/g, '-') : '';
+  }
+
+  gerarConsultasTexto(termosBusca, ano) {
+    const consultas = new Set();
+    const anoValido = ano && ano.length >= 4 ? ano : '';
+
+    termosBusca.forEach((termo) => {
+      if (!termo) return;
+      consultas.add(termo);
+      if (anoValido) {
+        consultas.add(`${termo} ${anoValido}`);
+      }
+    });
+
+    return Array.from(consultas).slice(0, 5); // Limita a 5 consultas para evitar abuso
+  }
+
+  gerarURLsOLX(marca, modelo, ano) {
+    const urls = new Set();
+    const marcaSlug = this.slugify(marca);
+    const modeloSlug = this.slugify(modelo);
+
+    if (marcaSlug && modeloSlug && ano) {
+      urls.add(`https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${marcaSlug}/${modeloSlug}/${ano}`);
+    }
+    if (marcaSlug && modeloSlug) {
+      urls.add(`https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${marcaSlug}/${modeloSlug}`);
+    }
+    if (marcaSlug) {
+      urls.add(`https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${marcaSlug}`);
+    }
+
+    return Array.from(urls);
+  }
+
+  gerarURLsWebmotors(marca, modelo, ano) {
+    const urls = new Set();
+    const marcaSlug = this.slugify(marca);
+    const modeloSlug = this.slugify(modelo);
+
+    if (marcaSlug && modeloSlug && ano) {
+      urls.add(`https://www.webmotors.com.br/carros/${marcaSlug}/${modeloSlug}?ano=${ano}`);
+    }
+    if (marcaSlug && modeloSlug) {
+      urls.add(`https://www.webmotors.com.br/carros/${marcaSlug}/${modeloSlug}`);
+    }
+    if (marcaSlug) {
+      urls.add(`https://www.webmotors.com.br/carros/${marcaSlug}`);
+    }
+
+    return Array.from(urls);
+  }
+
+  async coletarPrecosDeURL(config, precos, precosEncontrados) {
+    const { url, site = 'Site', seletores = [], seletorLinks } = config;
+    if (!url) return;
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': this.userAgent,
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'pt-BR,pt;q=0.9',
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.warn(`[${site}] Resposta ${response.status} ao acessar ${url}`);
+        return;
+      }
+
+      const html = await response.text();
+      const $ = cheerio.load(html);
+      const totalAntes = precos.length;
+
+      this.extrairPrecosSeletores($, seletores, precos, precosEncontrados);
+
+      if (precos.length - totalAntes < 3) {
+        this.extrairPrecosPorRegex(html, precos, precosEncontrados);
+      }
+
+      if (seletorLinks && precos.length - totalAntes < 3) {
+        this.extrairPrecosEmLinks($, seletorLinks, precos, precosEncontrados);
+      }
+
+      const novos = precos.length - totalAntes;
+      console.log(`[${site}] ${url} => +${novos} preços (total ${precos.length})`);
+
+    } catch (error) {
+      console.warn(`[${site}] Falha ao coletar preços de ${url}: ${error.message}`);
+    }
+  }
+
+  extrairPrecosSeletores($, seletores, precos, precosEncontrados) {
+    seletores.forEach((seletor) => {
+      $(seletor).each((_, element) => {
+        try {
+          const precoTexto = $(element).text().trim();
+          const preco = this.extrairPreco(precoTexto);
+          this.adicionarPreco(preco, precos, precosEncontrados);
+        } catch {
+          // Ignora erros individuais
+        }
+      });
+    });
+  }
+
+  extrairPrecosPorRegex(html, precos, precosEncontrados) {
+    if (!html) return;
+    const regexPreco = /R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)/gi;
+    const matches = html.match(regexPreco);
+
+    if (!matches) return;
+
+    matches.forEach((match) => {
+      const preco = this.extrairPreco(match);
+      this.adicionarPreco(preco, precos, precosEncontrados);
+    });
+  }
+
+  extrairPrecosEmLinks($, seletorLinks, precos, precosEncontrados) {
+    $(seletorLinks).each((_, element) => {
+      try {
+        const precoTexto = $(element).text();
+        const preco = this.extrairPreco(precoTexto);
+        this.adicionarPreco(preco, precos, precosEncontrados);
+      } catch {
+        // Ignora erros individuais
+      }
+    });
+  }
+
+  adicionarPreco(preco, precos, precosEncontrados) {
+    if (preco > 0 && preco < 1000000 && !precosEncontrados.has(preco)) {
+      precos.push(preco);
+      precosEncontrados.add(preco);
+    }
   }
 
   /**
