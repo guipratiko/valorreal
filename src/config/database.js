@@ -33,9 +33,7 @@ const connectDB = async () => {
       useUnifiedTopology: true,
       serverSelectionTimeoutMS: 10000, // 10 segundos
       socketTimeoutMS: 45000, // 45 segundos
-      connectTimeoutMS: 10000, // 10 segundos
-      bufferMaxEntries: 0, // Desabilita buffering para evitar timeouts
-      bufferCommands: false, // Desabilita buffering de comandos
+      connectTimeoutMS: 10000 // 10 segundos
     });
 
     // Event listeners para monitorar a conexão
