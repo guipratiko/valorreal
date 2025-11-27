@@ -25,18 +25,23 @@ class PlacasService {
 
       // Verifica se existe no cache
       try {
-        const cache = await PlacaCache.findOne({ placa: placaFormatada });
-        if (cache && cache.dados) {
-          console.log(`✅ Placa ${placaFormatada} encontrada no cache`);
-          return {
-            success: true,
-            data: cache.dados,
-            cached: true
-          };
+        // Verifica se o mongoose está conectado antes de tentar usar
+        if (require('mongoose').connection.readyState === 1) {
+          const cache = await PlacaCache.findOne({ placa: placaFormatada }).maxTimeMS(5000);
+          if (cache && cache.dados) {
+            console.log(`✅ Placa ${placaFormatada} encontrada no cache`);
+            return {
+              success: true,
+              data: cache.dados,
+              cached: true
+            };
+          }
         }
       } catch (cacheError) {
         // Se MongoDB não estiver disponível, continua normalmente
-        console.log('Cache não disponível, consultando API...');
+        if (cacheError.name !== 'MongoServerSelectionError' && cacheError.message !== 'buffering timed out') {
+          console.log('Cache não disponível, consultando API...');
+        }
       }
 
       // Se não encontrou no cache, consulta a API
@@ -74,22 +79,31 @@ class PlacasService {
         if (data.marca || data.MARCA) {
           // Salva no cache para próximas consultas (válido por 30 dias)
           try {
-            const expiresAt = new Date();
-            expiresAt.setDate(expiresAt.getDate() + 30); // Adiciona 30 dias
-            
-            await PlacaCache.findOneAndUpdate(
-              { placa: placaFormatada },
-              { 
-                placa: placaFormatada,
-                dados: data,
-                expiresAt: expiresAt
-              },
-              { upsert: true, new: true }
-            );
-            console.log(`💾 Placa ${placaFormatada} salva no cache (expira em 30 dias)`);
+            // Verifica se o mongoose está conectado antes de tentar salvar
+            if (require('mongoose').connection.readyState === 1) {
+              const expiresAt = new Date();
+              expiresAt.setDate(expiresAt.getDate() + 30); // Adiciona 30 dias
+              
+              await PlacaCache.findOneAndUpdate(
+                { placa: placaFormatada },
+                { 
+                  placa: placaFormatada,
+                  dados: data,
+                  expiresAt: expiresAt
+                },
+                { 
+                  upsert: true, 
+                  new: true,
+                  maxTimeMS: 5000 // Timeout de 5 segundos
+                }
+              );
+              console.log(`💾 Placa ${placaFormatada} salva no cache (expira em 30 dias)`);
+            }
           } catch (cacheError) {
             // Se falhar ao salvar no cache, continua normalmente
-            console.log('Erro ao salvar no cache:', cacheError.message);
+            if (cacheError.name !== 'MongoServerSelectionError' && !cacheError.message.includes('buffering timed out')) {
+              console.log('Erro ao salvar no cache:', cacheError.message);
+            }
           }
 
           return {

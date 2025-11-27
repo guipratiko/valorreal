@@ -31,18 +31,52 @@ class PlacasController {
       // Se resultado já tem success: true, busca preços e adiciona ao resultado
       if (resultado && resultado.success && resultado.data) {
         try {
-          // Busca preços médios no OLX e Webmotors
-          const precosMedio = await precoService.buscarPrecosMedio(resultado.data);
+          // Verifica se tem dados mínimos para buscar preços
+          const temDadosMinimos = (resultado.data.MARCA || resultado.data.marca) && 
+                                  (resultado.data.MODELO || resultado.data.modelo) && 
+                                  (resultado.data.ano || resultado.data.anoModelo);
           
-          // Adiciona informações de preços ao resultado
-          resultado.data.precosMedio = precosMedio;
+          if (temDadosMinimos) {
+            console.log(`🔍 Buscando preços para placa ${req.params.placa}...`);
+            // Busca preços médios no OLX e Webmotors
+            const precosMedio = await precoService.buscarPrecosMedio(resultado.data);
+            
+            // Adiciona informações de preços ao resultado
+            resultado.data.precosMedio = precosMedio;
+            
+            if (precosMedio.success) {
+              console.log(`✅ Preços encontrados para placa ${req.params.placa}: ${precosMedio.fonte || 'N/A'}`);
+            } else {
+              console.log(`⚠️  Nenhum preço encontrado para placa ${req.params.placa}: ${precosMedio.message || 'N/A'}`);
+            }
+          } else {
+            console.log(`⚠️  Dados insuficientes para buscar preços da placa ${req.params.placa}`);
+            resultado.data.precosMedio = {
+              success: false,
+              message: 'Dados insuficientes para buscar preços (faltam marca, modelo ou ano)',
+              precos: {
+                olx: [],
+                webmotors: [],
+                fipe: [],
+                todos: []
+              },
+              estatisticas: null
+            };
+          }
         } catch (error) {
-          console.error('Erro ao buscar preços médio:', error);
+          console.error(`❌ Erro ao buscar preços médio para placa ${req.params.placa}:`, error);
           // Continua mesmo se a busca de preços falhar
           resultado.data.precosMedio = {
             success: false,
             message: 'Erro ao buscar preços médio',
-            error: error.message
+            error: error.message,
+            precos: {
+              olx: [],
+              webmotors: [],
+              fipe: [],
+              todos: []
+            },
+            estatisticas: null
           };
         }
 

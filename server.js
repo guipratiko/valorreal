@@ -56,8 +56,12 @@ app.use((req, res) => {
   });
 });
 
-// Conecta ao MongoDB
-connectDB().catch(console.error);
+// Conecta ao MongoDB antes de iniciar o servidor
+connectDB().then((connected) => {
+  if (!connected) {
+    console.warn('⚠️  MongoDB não conectado. A API funcionará sem cache.');
+  }
+}).catch(console.error);
 
 // Inicia o servidor
 app.listen(PORT, async () => {
@@ -68,6 +72,11 @@ app.listen(PORT, async () => {
   // Verifica se o token está configurado
   if (!process.env.APIPLACAS_TOKEN) {
     console.warn('⚠️  AVISO: APIPLACAS_TOKEN não configurado no .env');
+  }
+  
+  // Verifica se MongoDB está configurado
+  if (!process.env.MONGODB_URI) {
+    console.warn('⚠️  AVISO: MONGODB_URI não configurado no .env');
   }
 });
 

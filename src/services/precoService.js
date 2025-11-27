@@ -215,19 +215,26 @@ class PrecoService {
    */
   async buscarPrecosMedio(dadosVeiculo) {
     try {
+      const { marca, modelo, ano } = this.prepararDadosBusca(dadosVeiculo);
+      console.log(`🔍 Buscando preços para: ${marca} ${modelo} ${ano}`);
+      
       // Busca em paralelo nos dois sites
       const [precosOLX, precosWebmotors] = await Promise.all([
         this.buscarPrecosOLX(dadosVeiculo),
         this.buscarPrecosWebmotors(dadosVeiculo)
       ]);
 
+      console.log(`📊 Preços encontrados - OLX: ${precosOLX.length}, Webmotors: ${precosWebmotors.length}`);
+
       const todosPrecos = [...precosOLX, ...precosWebmotors];
 
       // Se não encontrou preços, tenta usar dados da FIPE
       if (todosPrecos.length === 0) {
+        console.log('⚠️  Nenhum preço encontrado nos sites, tentando FIPE...');
         const precosFIPE = this.extrairPrecosFIPE(dadosVeiculo);
         
         if (precosFIPE.length > 0) {
+          console.log(`✅ Encontrados ${precosFIPE.length} preços na FIPE`);
           const estatisticas = this.calcularEstatisticas(precosFIPE);
           return {
             success: true,
@@ -242,12 +249,14 @@ class PrecoService {
           };
         }
         
+        console.log('❌ Nenhum preço encontrado (nem nos sites nem na FIPE)');
         return {
           success: false,
           message: 'Nenhum preço encontrado',
           precos: {
             olx: [],
             webmotors: [],
+            fipe: [],
             todos: []
           },
           estatisticas: null
